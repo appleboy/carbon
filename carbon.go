@@ -3,7 +3,9 @@ package carbon
 import (
 	"errors"
 	"math"
+	"runtime"
 	"time"
+	"regexp"
 )
 
 // Represent the number of elements in a given period
@@ -44,6 +46,7 @@ type Carbon struct {
 	weekEndsAt   time.Weekday
 	weekendDays  []time.Weekday
 	stringFormat string
+	Translator   *Translator
 }
 
 // NewCarbon returns a pointer to a new Carbon instance
@@ -581,31 +584,6 @@ func (c *Carbon) SetTimezone(name string) error {
 	return nil
 }
 
-// Get the translator instance in use
-func GetTranslator() {
-	// TODO: Not Implemented
-}
-
-// Set the translator instance to use
-func SetTranslator() {
-	// TODO: Not Implemented
-}
-
-// Get the current translator locale
-func GetLocale() {
-	// TODO: Not Implemented
-}
-
-// Set the current translator locale and indicate if the source locale file exists
-func SetLocale() {
-	// TODO: Not Implemented
-}
-
-// Format the instance with the current locale.
-func FormatLocalized() {
-	// TODO: Not Implemented
-}
-
 // ResetStringFormat changes the format to the DefaultFormat
 func (c *Carbon) ResetStringFormat() {
 	c.stringFormat = DefaultFormat
@@ -1121,18 +1099,107 @@ func swap(a, b *Carbon) (*Carbon, *Carbon) {
 // When comparing a value in the future to another value:
 // 1 hour after
 // 5 months after
-func DiffForHumans() {
-}
+func (c *Carbon) DiffForHumans(d *Carbon, absolute bool) error {
+	isNow := (d == nil)
+	if isNow {
+		d = Now()
+	}
 
-//-----------------------------------------------------------
+	// TODO we need a difference in c and d (dateInterval)
 
-// Determine if there is a relative keyword in the time string, this is to
-// create dates relative to now for test instances. e.g.: next tuesday
-func HasRelativeKeywords() {
-}
+	var unit string
+	var count int64
 
-// Intialize the translator instance if necessary.
-func Translator() {
+	switch true {
+	case c.DiffInYears(d, absolute) > 0:
+		unit = "year"
+		count = c.DiffInYears(d, absolute)
+		break
+
+	case c.DiffInMonths(d, absolute) > 0:
+		unit = "month"
+		count = c.DiffInMonths(d, absolute)
+		break
+
+	case c.DiffInDays(d, absolute) > 0:
+		unit = "day"
+		count = c.DiffInDays(d, absolute)
+		if count >= DaysPerWeek {
+			unit = "week"
+			count = float64(count / DaysPerWeek)
+		}
+		break
+
+	case c.DiffInHours(d, absolute) > 0:
+		unit = "hour"
+		count = c.DiffInHours(d, absolute)
+		break
+
+	case c.DiffInMinutes(d, absolute) > 0:
+		unit = "minute"
+		count = c.DiffInMinutes(d, absolute)
+		break
+
+	default:
+		unit = "second"
+		count = c.DiffInSeconds(d, absolute)
+		break
+	}
+
+	if count == 0 {
+		count = 1
+	}
+
+	t1, err := c.translator()
+	if err != nil {
+		return err
+	}
+
+	time := t1.TransChoice(unit, count)
+
+	if absolute {
+		return time
+	}
+
+	isFuture := (diffInterval.Invert == 1)
+
+	var transID string
+	if isNow {
+		if isFuture {
+			transID = "from_now"
+		} else {
+			transID = "ago"
+		}
+	} else {
+		if isFuture {
+			transID = "after"
+		} else {
+			transID = "before"
+		}
+	}
+
+	// Some langs have special pluralization for past and future tense.
+	tryKeyExists := unit + '_' + transID
+
+	t2, err := c.translator()
+	if err != nil {
+		return err
+	}
+
+	if tryKeyExists != t2.TransChoice(tryKeyExists, count) {
+		t3, err := c.translator()
+		if err != nil {
+			return err
+		}
+		time = t3.TransChoice(tryKeyExists, count)
+	}
+
+	t4, err := c.translator()
+	if err != nil {
+		return err
+	}
+
+	return t4.Trans(transID, "array(':time' => $time)")
 }
 
 // StartOfDay returns the time at 00:00:00 of the same day
@@ -1288,20 +1355,20 @@ func (c *Carbon) LastOfMonth(wd time.Weekday) *Carbon {
 // NthOfMonth returns the given occurence of a given day of the week in the current month
 // If the calculated occurrence is outside the scope of current month, no modifications are made
 func (c *Carbon) NthOfMonth(nth int, wd time.Weekday) *Carbon {
-	copy := c.Copy().StartOfMonth()
+	cp := c.Copy().StartOfMonth()
 	i := 0
-	if copy.Weekday() == wd {
+	if cp.Weekday() == wd {
 		i++
 	}
 	for i < nth {
-		copy = copy.Next(wd)
+		cp = cp.Next(wd)
 		i++
 	}
-	if copy.Gt(c.EndOfMonth()) {
+	if cp.Gt(c.EndOfMonth()) {
 		return c
 	}
 
-	return copy
+	return cp
 }
 
 // FirstOfQuarter returns the first occurence of a given day of the week in the current quarter
@@ -1327,20 +1394,20 @@ func (c *Carbon) LastOfQuarter(wd time.Weekday) *Carbon {
 // NthOfQuarter returns the given occurence of a given day of the week in the current quarter
 // If the calculated occurrence is outside the scope of current quarter, no modifications are made
 func (c *Carbon) NthOfQuarter(nth int, wd time.Weekday) *Carbon {
-	copy := c.Copy().StartOfQuarter()
+	cp := c.Copy().StartOfQuarter()
 	i := 0
-	if copy.Weekday() == wd {
+	if cp.Weekday() == wd {
 		i++
 	}
 	for i < nth {
-		copy = copy.Next(wd)
+		cp = cp.Next(wd)
 		i++
 	}
-	if copy.Gt(c.EndOfQuarter()) {
+	if cp.Gt(c.EndOfQuarter()) {
 		return c
 	}
 
-	return copy
+	return cp
 }
 
 // FirstOfYear returns the first occurence of a given day of the week in the current year
@@ -1366,20 +1433,20 @@ func (c *Carbon) LastOfYear(wd time.Weekday) *Carbon {
 // NthOfYear returns the given occurence of a given day of the week in the current year
 // If the calculated occurrence is outside the scope of current year, no modifications are made
 func (c *Carbon) NthOfYear(nth int, wd time.Weekday) *Carbon {
-	copy := c.Copy().StartOfYear()
+	cp := c.Copy().StartOfYear()
 	i := 0
-	if copy.Weekday() == wd {
+	if cp.Weekday() == wd {
 		i++
 	}
 	for i < nth {
-		copy = copy.Next(wd)
+		cp = cp.Next(wd)
 		i++
 	}
-	if copy.Gt(c.EndOfYear()) {
+	if cp.Gt(c.EndOfYear()) {
 		return c
 	}
 
-	return copy
+	return cp
 }
 
 // Average returns the average bewteen a given carbon date and the current date
@@ -1387,4 +1454,69 @@ func (c *Carbon) Average(carb *Carbon) *Carbon {
 	average := int(c.DiffInSeconds(carb, false) / 2)
 
 	return c.AddSeconds(average)
+}
+
+// Localization
+
+// GetTranslator returns Translator inside a Carbon instance
+func (c *Carbon) GetTranslator() (*Translator, error) {
+	return c.translator()
+}
+
+// translator returns translator inside a Carbon instance
+func (c *Carbon) translator() (*Translator, error) {
+	if c.Translator == nil {
+		c.Translator = NewTranslator()
+		c.Translator.AddLoader("array")
+		err := c.SetLocale("en")
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return c.Translator, nil
+}
+
+// SetTranslator sets the Translator inside a Carbon instance
+func (c *Carbon) SetTranslator(translator *Translator) {
+	c.Translator = translator
+}
+
+// GetLocale returns locale of the Translator of Carbon
+func (c *Carbon) GetLocale() string {
+	return c.Translator.GetLocale()
+}
+
+// SetLocale sets locale for the Translator of Carbon
+func (c *Carbon) SetLocale(locale string) error {
+	c.Translator.SetLocale(locale)
+	// TODO check how to keep the lang files and read them
+	err := c.Translator.AddResource(locale, "array", "./lang/"+locale+".go", "")
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// String Formatting
+
+// FormatLocalized
+func (c *Carbon) FormatLocalized(format string) (string, error) {
+	if runtime.GOOS == "windows" {
+		regExpObj, err := regexp.Compile("#(?<!%)((?:%%)*)%e#")
+		if err != nil {
+			return "", err
+		}
+		format = regExpObj.ReplaceAllString(format, "\1%#d")
+	}
+
+	return c.Format(format), nil
+}
+
+// Testing AIDS
+
+// Determine if there is a relative keyword in the time string, this is to
+// create dates relative to now for test instances. e.g.: next tuesday
+func HasRelativeKeywords() {
 }

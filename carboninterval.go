@@ -8,22 +8,6 @@ package carbon
 //func Instance() {
 //}
 
-// Get the translator instance in use
-//func GetTranslator() {
-//}
-
-// Set the translator instance to use
-//func SetTranslator() {
-//}
-
-// Get the current translator locale
-//func GetLocale() {
-//}
-
-// Set the current translator locale
-//func SetLocale() {
-//}
-
 // Allow setting of weeks and days to be cumulative.
 func WeeksAndDays() {
 }
